@@ -10,10 +10,10 @@ from urllib.parse import urlparse, urlunparse
 RSS_URL = "https://androiddagashi.github.io/feed.xml"
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")  # GitHub Actions対応
 
-SENT_FILE = Path("sent_links.json")
+STATE_FILE = Path("state.json")
 SEND_INTERVAL = 0.7
 MAX_LINKS = 1000
-CHECK_ENTRIES = 3
+CHECK_ENTRIES = 2
 
 
 # ===== URL正規化 =====
@@ -23,17 +23,16 @@ def normalize_url(url: str):
 
 
 # ===== 永続化 =====
-def load_sent_links():
-    if SENT_FILE.exists():
-        with open(SENT_FILE, "r", encoding="utf-8") as f:
-            return set(json.load(f))
-    return set()
+def load_state():
+    if STATE_FILE.exists():
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"sent_ids": []}
 
 
-def save_sent_links(links):
-    trimmed = list(links)[-MAX_LINKS:]
-    with open(SENT_FILE, "w", encoding="utf-8") as f:
-        json.dump(trimmed, f, ensure_ascii=False, indent=2)
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
 
 
 # ===== Discord送信 =====
@@ -71,7 +70,8 @@ def main():
         print("Webhook URL not set")
         return
 
-    sent_links = load_sent_links()
+    state = load_state()
+    sent_ids = set(state["sent_ids"])
 
     feed = feedparser.parse(RSS_URL)
     if not feed.entries:
@@ -79,35 +79,34 @@ def main():
         return
 
     # 初回実行時は送信しない
-    if not SENT_FILE.exists():
+    if not STATE_FILE.exists():
         print("First run: skip sending")
-        links = {normalize_url(entry.link) for entry in feed.entries[:CHECK_ENTRIES]}
-        save_sent_links(links)
+        ids = [entry.id for entry in feed.entries[:CHECK_ENTRIES]]
+        save_state({"sent_ids": ids})
         return
 
     new_count = 0
 
     for entry in feed.entries[:CHECK_ENTRIES]:
+        entry_id = entry.id
         title = entry.title
         link = entry.link
         summary = entry.get("summary", "")
 
-        normalized = normalize_url(link)
-
-        if normalized in sent_links:
+        if entry_id in sent_ids:
             continue
 
         print("Send:", title)
-
         send_discord(title, link, summary)
 
-        sent_links.add(normalized)
+        sent_ids.add(entry_id)
         new_count += 1
 
         time.sleep(SEND_INTERVAL)
 
     if new_count > 0:
-        save_sent_links(sent_links)
+        trimmed = list(sent_ids)[-50:]
+        save_state({"sent_ids": trimmed})
         print(f"{new_count} articles sent")
     else:
         print("No new articles")
