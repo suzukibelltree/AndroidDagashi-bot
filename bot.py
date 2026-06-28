@@ -26,7 +26,9 @@ def normalize_url(url: str):
 def load_state():
     if STATE_FILE.exists():
         with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            content = f.read().strip()
+            if content:
+                return json.loads(content)
     return {"sent_ids": []}
 
 
